@@ -1,96 +1,68 @@
 import requests
 import nltk
 import os
-import json
-import numpy as np
 import pandas as pd
-import nltk
-import matplotlib
-from nltk.tokenize import sent_tokenize, word_tokenize
-from nltk.corpus import stopwords
-from string import punctuation
 import re
-import numpy as np
+from nltk.corpus import stopwords
 from nltk.tokenize import RegexpTokenizer
 from nltk.stem import WordNetLemmatizer
-from rake_nltk import Rake
-from datetime import datetime,timedelta
-date=datetime.now()-timedelta(1)
-date=date.strftime('%Y-%m-%d')
+from dotenv import load_dotenv
+from datetime import datetime, timedelta
 
-url = 'https://newsapi.org/v2/everything?'
-api_key = '9cc1b62d32e547bbbb09938de1601768'
+nltk.download('stopwords')
+nltk.download('punkt')
+nltk.download('wordnet')
 
-# function to take raw data from the API and process it into a list inorder to trnasform it into a pandas dataframe
+# Load environment variables
+load_dotenv()
+url = os.getenv("URL")
+api_key = os.getenv('API_KEY')
+
+# Set the date to yesterday
+date = (datetime.now() - timedelta(1)).strftime('%Y-%m-%d')
+
+# Function to fetch articles from the API and process them into a dictionary list
 def get_articles(file):
     article_results = []
     for i in range(len(file)):
-        article_dict = {}
-        article_dict['title'] = file[i]['title']
-        article_dict['author'] = file[i]['author']
-        article_dict['source'] = file[i]['source']
-        article_dict['description'] = file[i]['description']
-        article_dict['content'] = file[i]['content']
-        article_dict['pub_date'] = file[i]['publishedAt']
-        article_dict['url'] = file[i]["url"]
-        article_dict['photo_url'] = file[i]['urlToImage']
+        article_dict = {
+            'title': file[i]['title'],
+            'author': file[i]['author'],
+            'source': file[i]['source'],
+            'description': file[i]['description'],
+            'content': file[i]['content'],
+            'pub_date': file[i]['publishedAt'],
+            'url': file[i]["url"],
+            'photo_url': file[i]['urlToImage']
+        }
         article_results.append(article_dict)
     return article_results
-# function to exatract just the name of the source of the news article and exclude other details
 
+# Fetch news articles from multiple domains
+def fetch_articles(domains, url, api_key, date):
+    responses_list = []
+    for domain in domains:
+        parameters_headlines = {
+            'domains': domain,
+            'sortBy': 'popularity',
+            'pageSize': 100,
+            'apiKey': api_key,
+            'language': 'en',
+            'from': date
+        }
+        rr = requests.get(url, params=parameters_headlines)
+        data = rr.json()
+        responses = data.get("articles", [])
+        responses_list.append(pd.DataFrame(get_articles(responses)))
+    
+    return pd.concat(responses_list, ignore_index=True)
 
-responses_list = [] # stores responses for various news sources instead of overwriting it
-domains = ['wsj.com','aljazeera.com','bbc.co.uk','techcrunch.com', 'nytimes.com','bloomberg.com','businessinsider.com',
-             'cbc.ca','cnbc.com','cnn.com','ew.com','espn.go.com','espncricinfo.com','foxnews.com', 'apnews.com',
-             'news.nationalgeographic.com','nymag.com','reuters.com','rte.ie','thehindu.com','huffingtonpost.com',
-             'irishtimes.com','timesofindia.indiatimes.com','washingtonpost.com','time.com','medicalnewstoday.com',
-             'ndtv.com','theguardian.com','dailymail.co.uk','firstpost.com','thejournal.ie', 'hindustantimes.com',
-             'economist.com','news.vice.com','usatoday.com','telegraph.co.uk','metro.co.uk','mirror.co.uk','news.google.com']
-for domain in domains:
-    parameters_headlines = {
-    'domains':format(domain),
-    'sortBy':'popularity',
-    'pageSize': 100,
-    'apiKey': api_key,
-    'language': 'en',
-    'from' : date
-    }
-    rr = requests.get(url, params = parameters_headlines)
-    data = rr.json()
-
-    responses = data["articles"]
-    # print(responses)
-    # Append the DataFrame to the list
-    responses_list.append(pd.DataFrame(get_articles(responses)))
-
-# Concatenate all DataFrames in the list into a single DataFrame
-news_articles_df = pd.concat(responses_list, ignore_index=True)
-
+# Extract the source names from the source dictionary
 def source_getter(df):
-    source = []
-    for source_dict in df['source']:
-        source.append(source_dict['name'])
-    df['source'] = source #append the source to the df
-# this fuincton extracts the source name from the source dictionary as seen above
-source_getter(news_articles_df)
+    df['source'] = df['source'].apply(lambda x: x['name'] if isinstance(x, dict) and 'name' in x else None)
+    return df
 
-# converted the publication date to date time format for future analysis
-news_articles_df['pub_date'] = pd.to_datetime(news_articles_df['pub_date']).apply(lambda x: x.date())
-
-# drop the rows that have missing data
-print( "droping the rows with missing data")
-news_articles_df.dropna(inplace=True)
-news_articles_df = news_articles_df[~news_articles_df['description'].isnull()]
-print(news_articles_df.isnull().sum())
-print(news_articles_df.shape)
-
-# combine the title and the content to get one dataframe column
-news_articles_df['combined_text'] = news_articles_df['title'].map(str) +" "+ news_articles_df['content'].map(str)
-
-# Function to remove non-ascii characters from the text
-def _removeNonAscii(s):
-    return "".join(i for i in s if ord(i)<128)
-# function to remove the punctuations, apostrophe, special characters using regular expressions
+# Clean text by removing punctuation, contractions, and other unwanted characters
 def clean_text(text):
     text = text.lower()
     text = re.sub(r"what's", "what is ", text)
@@ -109,46 +81,59 @@ def clean_text(text):
     text = re.sub(r"\'", "", text)
     text = re.sub(r"\"", "", text)
     text = re.sub('[^a-zA-Z ?!]+', '', text)
-    text = _removeNonAscii(text)
-    text = text.strip()
-    return text
-# stop words are the words that convery little to no information about the actual content like the words:the, of, for etc
+    text = "".join(i for i in text if ord(i) < 128)  # Remove non-ASCII characters
+    return text.strip()
+
+# Remove stopwords from a list of tokens
 def remove_stopwords(word_tokens):
-    filtered_sentence = []
-    stop_words = stopwords.words('english')
+    stop_words = set(stopwords.words('english'))
     specific_words_list = ['char', 'u', 'hindustan', 'doj', 'washington']
-    stop_words.extend(specific_words_list )
-    for w in word_tokens:
-        if w not in stop_words:
-            filtered_sentence.append(w)
-    return filtered_sentence
-# function for lemmatization
-def lemmatize(x):
+    stop_words.update(specific_words_list)
+    return [w for w in word_tokens if w not in stop_words]
+
+# Lemmatize tokens
+def lemmatize(tokens):
     lemmatizer = WordNetLemmatizer()
-    return' '.join([lemmatizer.lemmatize(word) for word in x])
+    return ' '.join([lemmatizer.lemmatize(word) for word in tokens])
 
-# splitting a string, text into a list of tokens
+# Tokenize text
 tokenizer = RegexpTokenizer(r'\w+')
-def tokenize(x):
-    return tokenizer.tokenize(x)
+def tokenize(text):
+    return tokenizer.tokenize(text)
 
-# applying all of these functions to the our dataframe
-news_articles_df['combined_text'] = news_articles_df['combined_text'].map(clean_text)
-news_articles_df['tokens'] = news_articles_df['combined_text'].map(tokenize)
-news_articles_df['tokens'] = news_articles_df['tokens'].map(remove_stopwords)
-news_articles_df['lems'] =news_articles_df['tokens'].map(lemmatize)
+# Process the news data
+def process_news_data(news_articles_df):
+    # Clean the text
+    news_articles_df['combined_text'] = news_articles_df['title'].map(str) + " " + news_articles_df['content'].map(str)
+    news_articles_df['combined_text'] = news_articles_df['combined_text'].map(clean_text)
 
+    # Tokenize, remove stopwords, and lemmatize
+    news_articles_df['tokens'] = news_articles_df['combined_text'].map(tokenize)
+    news_articles_df['tokens'] = news_articles_df['tokens'].map(remove_stopwords)
+    news_articles_df['lems'] = news_articles_df['tokens'].map(lemmatize)
 
-# finding the keywords using the rake algorithm from NLTK
-# rake is Rapid Automatic Keyword Extraction algorithm, and is used for domain independent keyword extraction
-# news_articles_df['keywords'] = ""
-# for index,row in news_articles_df.iterrows():
-#     comb_text = row['combined_text']
-#     r = Rake()
-#     r.extract_keywords_from_text(comb_text)
-#     key_words_dict = r.get_word_degrees()
-#     row['keywords'] = list(key_words_dict.keys())
-# # applying the fucntion to the dataframe
-# news_articles_df['keywords'] = news_articles_df['keywords'].map(remove_stopwords)
-# news_articles_df['lems'] =news_articles_df['keywords'].map(lemmatize)
-news_articles_df.to_csv("assets/news_articles_clean.csv", index=False)
+    # Drop rows with missing data
+    news_articles_df.dropna(inplace=True)
+
+    # Convert pub_date to datetime format
+    news_articles_df['pub_date'] = pd.to_datetime(news_articles_df['pub_date']).apply(lambda x: x.date())
+
+    # Extract source names
+    news_articles_df = source_getter(news_articles_df)
+
+    return news_articles_df
+
+# Save the processed DataFrame to CSV
+def save_to_csv(df, path="assets/news_articles_clean.csv"):
+    df.to_csv(path, index=False)
+
+# Main function to fetch, process, and save the articles
+def main():
+    domains = ['wsj.com', 'aljazeera.com', 'bbc.co.uk', 'techcrunch.com', 'nytimes.com', 'bloomberg.com']
+    news_articles_df = fetch_articles(domains, url, api_key, date)
+    news_articles_df = process_news_data(news_articles_df)
+    save_to_csv(news_articles_df)
+
+# Allow this script to be used as an importable module or run as a standalone script
+if __name__ == "__main__":
+    main()
