@@ -5,3 +5,4 @@ from analyzer import main as analyze_polarity
 if __name__ == "__main__":
     process_news()
     analyze_polarity()
+    print("Successfuly executed")
