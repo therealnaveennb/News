@@ -7,8 +7,10 @@ from nltk.corpus import stopwords
 from nltk.tokenize import RegexpTokenizer
 from nltk.stem import WordNetLemmatizer
 from dotenv import load_dotenv
-from datetime import datetime, timedelta
-
+from datetime import datetime, timedelta, date
+from pymongo import MongoClient, server_api
+from urllib.parse import quote_plus
+import os
 nltk.download('stopwords')
 nltk.download('punkt')
 nltk.download('wordnet')
@@ -17,8 +19,9 @@ nltk.download('wordnet')
 load_dotenv()
 url = os.getenv("URL")
 api_key = os.getenv('API_KEY')
+ 
 
-# Set the date to yesterday
+# Set the date to 1 days ago
 date = (datetime.now() - timedelta(1)).strftime('%Y-%m-%d')
 
 # Function to fetch articles from the API and process them into a dictionary list
@@ -123,16 +126,65 @@ def process_news_data(news_articles_df):
 
     return news_articles_df
 
+# Save the processed DataFrame to MongoDB
+def save_to_mongodb(df, collection_name):
+    # Get MongoDB credentials from environment variables
+    mongo_username = quote_plus(os.getenv('MONGO_USERNAME'))
+    db_password = quote_plus(os.getenv('MONGO_PASSWORD'))
+    db_name = os.getenv('DB_NAME')
+
+    # MongoDB connection URI with escaped username and password
+    uri = f"mongodb+srv://{mongo_username}:{db_password}@news-analyzer.0ittn.mongodb.net/{db_name}?retryWrites=true&w=majority&appName=News-analyzer"
+
+    # Create a new client and connect to the MongoDB server
+    client = MongoClient(uri, server_api=server_api.ServerApi('1'))
+
+    # Test connection by pinging the MongoDB server
+    try:
+        client.admin.command('ping')
+        print("Pinged your deployment. You successfully connected to MongoDB!")
+    except Exception as e:
+        print(f"Error connecting to MongoDB: {e}")
+        return
+
+    # Access the database and collection
+    db = client[db_name]
+    collection = db[collection_name]
+
+    data_dict = df.to_dict("records")
+    for record in data_dict:
+        if 'pub_date' in record :
+            # Convert date to datetime
+            record['pub_date'] = datetime.combine(record['pub_date'], datetime.min.time())
+
+    # Convert DataFrame to dictionary and insert into MongoDB
+    try:
+        
+        collection.insert_many(data_dict)
+        print(f"{len(data_dict)} records inserted into the {collection_name} collection in MongoDB.")
+    except Exception as e:
+        print(f"Error inserting data into MongoDB: {e}")
 # Save the processed DataFrame to CSV
 def save_to_csv(df, path="assets/news_articles_clean.csv"):
+    os.makedirs(os.path.dirname(path), exist_ok=True)  # Ensure the directory exists
     df.to_csv(path, index=False)
+    print(f"CSV file saved to {path}.")
 
 # Main function to fetch, process, and save the articles
 def main():
-    domains = ['wsj.com', 'aljazeera.com', 'bbc.co.uk', 'techcrunch.com', 'nytimes.com', 'bloomberg.com']
+    domains = ['wsj.com','aljazeera.com','bbc.co.uk','techcrunch.com', 'nytimes.com','bloomberg.com','businessinsider.com',
+             'cbc.ca','cnbc.com','cnn.com','ew.com','espn.go.com','espncricinfo.com','foxnews.com', 'apnews.com',
+             'news.nationalgeographic.com','nymag.com','reuters.com','rte.ie','thehindu.com','huffingtonpost.com',
+             'irishtimes.com','timesofindia.indiatimes.com','washingtonpost.com','time.com','medicalnewstoday.com',
+             'ndtv.com','theguardian.com','dailymail.co.uk','firstpost.com','thejournal.ie', 'hindustantimes.com',
+             'economist.com','news.vice.com','usatoday.com','telegraph.co.uk','metro.co.uk','mirror.co.uk','news.google.com']
     news_articles_df = fetch_articles(domains, url, api_key, date)
     news_articles_df = process_news_data(news_articles_df)
-    save_to_csv(news_articles_df)
+
+    # Save to CSV and MongoDB
+    save_to_csv(news_articles_df, path=f"assets/{date}.csv")
+    save_to_mongodb(news_articles_df, collection_name="DailyNews")
+
 
 # Allow this script to be used as an importable module or run as a standalone script
 if __name__ == "__main__":

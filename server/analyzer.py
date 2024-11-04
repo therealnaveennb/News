@@ -1,10 +1,40 @@
 import pandas as pd
 import nltk
+import os
 from nltk.sentiment.vader import SentimentIntensityAnalyzer as SIA
+from pymongo import MongoClient, server_api
+from dotenv import load_dotenv
+from urllib.parse import quote_plus
+import json
+
 nltk.download('vader_lexicon')
-# Function to read the cleaned CSV file
-def read_cleaned_data(file_path='assets/news_articles_clean.csv'):
-    return pd.read_csv(file_path)
+load_dotenv()
+# Function to connect to MongoDB and retrieve data from a collection
+def fetch_data_from_mongodb(collection_name):
+   # Get MongoDB credentials from environment variables
+    mongo_username = quote_plus(os.getenv('MONGO_USERNAME'))
+    db_password = quote_plus(os.getenv('MONGO_PASSWORD'))
+    db_name = os.getenv('DB_NAME')
+
+    # MongoDB connection URI with escaped username and password
+    uri = f"mongodb+srv://{mongo_username}:{db_password}@news-analyzer.0ittn.mongodb.net/{db_name}?retryWrites=true&w=majority&appName=News-analyzer"
+
+    # Create a new client and connect to the MongoDB server
+    client = MongoClient(uri, server_api=server_api.ServerApi('1'))
+
+    # Test connection by pinging the MongoDB server
+    try:
+        client.admin.command('ping')
+        print("Pinged your deployment. You successfully connected to MongoDB!")
+    except Exception as e:
+        print(f"Error connecting to MongoDB: {e}")
+        return
+    
+    # Retrieve data from the collection and convert it to a DataFrame
+    db = client[db_name]
+    collection = db[collection_name]
+    data = list(collection.find({}))
+    return pd.DataFrame(data)
 
 # Function to calculate sentiment polarity using NLTK's SentimentIntensityAnalyzer
 def calculate_polarity(df):
@@ -39,22 +69,25 @@ def group_by_source(polarity_df):
     return grouped_df
 
 # Function to save the mean polarity to CSV
-def save_mean_polarity(grouped_df, file_path='assets/mean_polarity.csv'):
-    grouped_df.to_csv(file_path, index_label='source')
+def save_polarity(polarity_df, file_path='assets/mean_polarity.csv'):
+    polarity_df.to_csv(file_path, index_label='source')
 
 # Main function to tie all the steps together
 def main():
-    # Read the cleaned data
-    news_articles_df = read_cleaned_data()
+   
     
+
+    # Fetch data from MongoDB
+    news_articles_df = fetch_data_from_mongodb(collection_name="DailyNews")
+    print(news_articles_df)
     # Calculate polarity scores
     headlines_polarity = calculate_polarity(news_articles_df)
-    
+    save_polarity(headlines_polarity)
     # Group by source and calculate the mean polarity
     mean_polarity_df = group_by_source(headlines_polarity)
     
     # Save the mean polarity DataFrame to a CSV file
-    save_mean_polarity(mean_polarity_df)
+    save_polarity(headlines_polarity)
 
 # Allow this script to be used as an importable module or run as a standalone script
 if __name__ == "__main__":
