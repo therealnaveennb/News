@@ -1,16 +1,18 @@
+<!-- src/App.vue -->
 <template>
   <div id="app">
-    <DashBoard />
+    <NavBar /> <!-- Add the NavBar at the top of the app -->
+    <router-view /> <!-- Render the active route component here -->
   </div>
 </template>
 
 <script>
-import DashBoard from './components/DashBoard.vue';
+import NavBar from './components/NavBar.vue';
 
 export default {
   name: 'App',
   components: {
-    DashBoard,
+    NavBar,
   },
 };
 </script>
@@ -20,6 +22,10 @@ body {
   font-family: Arial, sans-serif;
   background-color: #f4f4f9;
   margin: 0;
-  padding: 20px;
-}     
+  padding: 0;
+}
+
+#app {
+  padding-top: 20px;
+}
 </style>
